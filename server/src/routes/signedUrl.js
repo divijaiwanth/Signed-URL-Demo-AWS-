@@ -1,28 +1,19 @@
-import { randomUUID } from 'crypto';
 import { Router } from 'express';
 import { PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { s3Client } from '../s3Client.js';
+import { validateUploadRequest } from '../validateUploadRequest.js';
+import { buildObjectKey } from '../objectKey.js';
 
 const router = Router();
 
-const MIME_TYPE_PATTERN = /^[-\w.]+\/[-\w.+]+$/;
-
-function sanitizeFilename(filename) {
-  return filename.replace(/[^a-zA-Z0-9._-]/g, '_');
-}
-
 router.post('/signed-url', async (req, res) => {
-  const { filename, contentType } = req.body ?? {};
-
-  if (!filename || typeof filename !== 'string') {
-    return res.status(400).json({ error: 'filename is required' });
-  }
-  if (!contentType || !MIME_TYPE_PATTERN.test(contentType)) {
-    return res.status(400).json({ error: 'a valid contentType is required' });
+  const { filename, contentType, error } = validateUploadRequest(req.body);
+  if (error) {
+    return res.status(400).json({ error });
   }
 
-  const key = `uploads/${randomUUID()}-${sanitizeFilename(filename)}`;
+  const key = buildObjectKey(filename);
   const expiresIn = Number(process.env.URL_EXPIRY_SECONDS) || 300;
 
   const command = new PutObjectCommand({
