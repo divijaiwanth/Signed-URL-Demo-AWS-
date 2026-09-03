@@ -6,10 +6,23 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-API_URL = os.getenv("API_URL", "http://localhost:4000/api/signed-url")
+API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:4000/api")
+SDK_ENDPOINT = f"{API_BASE_URL}/signed-url"
+MANUAL_ENDPOINT = f"{API_BASE_URL}/signed-url-manual"
 
 st.title("Signed URL Upload Demo")
-st.caption(f"Requesting signed URLs from {API_URL}")
+
+mode = st.radio(
+    "Signing method",
+    ["AWS SDK (getSignedUrl)", "Manual SigV4 (from scratch)"],
+    help=(
+        "AWS SDK: the backend calls @aws-sdk/s3-request-presigner. "
+        "Manual: the backend signs the URL itself with raw HMAC-SHA256, no AWS SDK involved."
+    ),
+)
+endpoint = SDK_ENDPOINT if mode.startswith("AWS SDK") else MANUAL_ENDPOINT
+
+st.caption(f"Requesting signed URLs from {endpoint}")
 
 uploaded_file = st.file_uploader("Choose a file to upload")
 
@@ -20,7 +33,7 @@ if uploaded_file is not None:
         with st.spinner("Requesting signed URL..."):
             try:
                 resp = requests.post(
-                    API_URL,
+                    endpoint,
                     json={"filename": uploaded_file.name, "contentType": content_type},
                     timeout=10,
                 )
@@ -32,6 +45,55 @@ if uploaded_file is not None:
 
         upload_url = payload["uploadUrl"]
         key = payload["key"]
+        steps = payload.get("steps")
+
+        if steps:
+            st.subheader("How this URL was signed (AWS Signature Version 4)")
+
+            st.markdown(
+                "**1. Canonical request** — method, path, query string, headers "
+                "and payload hash, reduced to one exact byte string."
+            )
+            st.code(steps["canonicalRequest"], language="text")
+
+            st.markdown("**2. SHA-256 hash of the canonical request**")
+            st.code(steps["hashedCanonicalRequest"], language="text")
+
+            st.markdown(
+                "**3. String to sign** — algorithm, timestamp, credential scope "
+                "(date/region/service), and the hash above."
+            )
+            st.code(steps["stringToSign"], language="text")
+
+            st.markdown(
+                "**4. Signing key derivation** — four nested HMAC-SHA256 calls "
+                "scope the key to this exact date, region and service."
+            )
+            chain = steps["signingKeyChain"]
+            st.code(
+                "kDate    = HMAC('AWS4' + secretKey, \"{date}\")\n"
+                "         = {kDate}\n"
+                "kRegion  = HMAC(kDate, \"{region}\")\n"
+                "         = {kRegion}\n"
+                "kService = HMAC(kRegion, \"s3\")\n"
+                "         = {kService}\n"
+                "kSigning = HMAC(kService, \"aws4_request\")\n"
+                "         = {kSigning}".format(
+                    date=steps["dateStamp"],
+                    region=steps["region"],
+                    kDate=chain["kDate"],
+                    kRegion=chain["kRegion"],
+                    kService=chain["kService"],
+                    kSigning=chain["kSigning"],
+                ),
+                language="text",
+            )
+
+            st.markdown("**5. Final signature** — HMAC-SHA256(signingKey, stringToSign)")
+            st.code(steps["signature"], language="text")
+
+        st.markdown("**Resulting presigned URL**")
+        st.code(upload_url, language="text")
 
         with st.spinner("Uploading to S3..."):
             try:
