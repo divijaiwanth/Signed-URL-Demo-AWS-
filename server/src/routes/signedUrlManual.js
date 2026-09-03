@@ -18,16 +18,20 @@ router.post('/signed-url-manual', (req, res) => {
   const key = buildObjectKey(filename);
   const expiresIn = Number(process.env.URL_EXPIRY_SECONDS) || 300;
 
-  const { url, steps } = buildPresignedPutUrl({
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-    region: process.env.AWS_REGION,
-    bucket: process.env.S3_BUCKET_NAME,
-    key,
-    expiresIn,
-  });
-
-  res.json({ uploadUrl: url, key, expiresIn, steps });
+  try {
+    const { url, steps } = buildPresignedPutUrl({
+      accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+      secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+      region: process.env.AWS_REGION,
+      bucket: process.env.S3_BUCKET_NAME,
+      key,
+      expiresIn,
+    });
+    res.json({ uploadUrl: url, key, expiresIn, steps });
+  } catch (err) {
+    console.error('Failed to create manual signed URL:', err);
+    res.status(500).json({ error: 'failed to create signed URL' });
+  }
 });
 
 export default router;
